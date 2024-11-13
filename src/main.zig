@@ -70,7 +70,7 @@ pub fn countAllInDir(dir_name: []const u8, stats: *Stats) !void {
     var dir = try openDir(dir_name);
     defer dir.close();
 
-    debug("{s}\r", .{try std.fs.cwd().realpathAlloc(allocator, dir_name)});
+    debug("{s}\x1b[K\r", .{try std.fs.cwd().realpathAlloc(allocator, dir_name)});
 
     var iter = dir.iterate();
     while (try iter.next()) |item| {
