@@ -2,8 +2,10 @@ const std = @import("std");
 const mem = std.mem;
 const debug = std.debug.print;
 const exit = std.process.exit;
-
 const Dir = std.fs.Dir;
+
+const graphs = @import("graphs.zig");
+const time = @import("time.zig");
 
 const allocator = std.heap.page_allocator;
 
@@ -12,15 +14,10 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // the first argument is the program name ("ispie")
+    // the first argument is the program name
     _ = args.next();
 
-    if (args.next()) |dir_name| {
-        try count(dir_name);
-    } else {
-        debug("Usage: ispie DIRECTORY_NAME [OPTIONS]\n", .{});
-        exit(1);
-    }
+    try count(args.next() orelse ".");
 }
 
 pub fn openDir(dir_name: []const u8) !Dir {
@@ -28,7 +25,7 @@ pub fn openDir(dir_name: []const u8) !Dir {
     return std.fs.cwd().openDir(dir_name, .{ .iterate = true });
 }
 
-const Stats = struct {
+pub const Stats = struct {
     file_count: usize = 0,
     dir_count: usize = 0,
     total_count: usize = 0,
@@ -37,11 +34,14 @@ const Stats = struct {
 };
 
 pub fn count(dir_name: []const u8) !void {
+    debug("Scanning \"{s}\"\n", .{try std.fs.cwd().realpathAlloc(allocator, dir_name)});
+
     var stats: Stats = .{
         .atimes = std.ArrayList(i128).init(allocator),
     };
 
     try countAllInDir(dir_name, &stats);
+    debug("\n", .{});
 
     var min_atime: ?i128 = null;
     var max_atime: ?i128 = null;
@@ -54,19 +54,23 @@ pub fn count(dir_name: []const u8) !void {
         if (max_atime orelse unreachable < item) max_atime = item;
     }
 
-    debug("Files: {d}\n", .{stats.file_count});
-    debug("Directories: {d}\n", .{stats.dir_count});
-    debug("Total: {d}\n", .{stats.total_count});
-    debug("Total Size: {d}\n", .{stats.total_file_sizes});
-    debug("atimes: {any}\n", .{stats.atimes.items});
-    debug("atimes min: {d}\n", .{min_atime orelse unreachable});
-    debug("atimes max: {d}\n", .{max_atime orelse unreachable});
-    debug("atimes diff: {d}\n", .{(max_atime orelse unreachable) - (min_atime orelse unreachable)});
+    // graphs.make_graph(stats.atimes, 7, 5);
+
+    debug("Files:           {d}\n", .{stats.file_count});
+    debug("Directories:     {d}\n", .{stats.dir_count});
+    debug("Total:           {d}\n", .{stats.total_count});
+    debug("Total Size:      ", .{});
+    printSize(stats.total_file_sizes);
+    debug("\n", .{});
+    debug("Oldest accesed:  {s}\n", .{time.toReadable(time.fromTimestamp(@intCast(min_atime orelse unreachable)))});
+    debug("Newest accesed:  {s}\n", .{time.toReadable(time.fromTimestamp(@intCast(max_atime orelse unreachable)))});
 }
 
 pub fn countAllInDir(dir_name: []const u8, stats: *Stats) !void {
     var dir = try openDir(dir_name);
     defer dir.close();
+
+    debug("{s}\r", .{try std.fs.cwd().realpathAlloc(allocator, dir_name)});
 
     var iter = dir.iterate();
     while (try iter.next()) |item| {
@@ -82,7 +86,9 @@ pub fn countAllInDir(dir_name: []const u8, stats: *Stats) !void {
 
             stats.total_file_sizes += stat.size;
 
-            stats.atimes.append(@divFloor(stat.atime, @as(i128, std.time.ns_per_s))) catch unreachable;
+            const atime_seconds = @divFloor(stat.atime, @as(i128, std.time.ns_per_s));
+
+            stats.atimes.append(atime_seconds) catch unreachable;
         } else if (item.kind == .directory) {
             stats.dir_count += 1;
 
@@ -106,4 +112,16 @@ pub fn stringConcat(s1: []const u8, s2: []const u8, alloc: mem.Allocator) []u8 {
     @memcpy(result[0..s1.len], s1);
     @memcpy(result[s1.len..], s2);
     return result;
+}
+
+pub fn printSize(size: usize) void {
+    if (size > 1_000_000_000) {
+        debug("{} GB", .{size / 1_000_000_000});
+    } else if (size > 1_000_000) {
+        debug("{} MB", .{size / 1_000_000});
+    } else if (size > 1_000) {
+        debug("{} KB", .{size / 1_000});
+    } else {
+        debug("{} B", .{size});
+    }
 }
